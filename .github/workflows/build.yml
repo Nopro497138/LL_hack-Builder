@@ -1,115 +1,55 @@
-name: Build Word Autofiller EXE
+name: Build Windows EXE
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
     
     steps:
-    - name: 📥 Checkout Repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
-    - name: 🐍 Setup Python
+    - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache: 'pip'
     
-    - name: 📦 Install Dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+        pip install keyboard pyautogui pytesseract pillow opencv-python pyttsx3 pyinstaller
     
-    - name: 🔨 Build EXE with PyInstaller
+    - name: Build EXE
       run: |
         pyinstaller --onefile --windowed --icon=icon.ico --add-data "words.json;." --name "WordAutofiller" main.py
     
-    - name: 📊 Get File Info
-      id: fileinfo
-      shell: pwsh
-      run: |
-        $fileSize = (Get-Item "dist/WordAutofiller.exe").Length
-        $fileSizeMB = [math]::Round($fileSize / 1MB, 2)
-        echo "size=$fileSizeMB MB" >> $env:GITHUB_OUTPUT
-        echo "hash=$(Get-FileHash -Algorithm SHA256 'dist/WordAutofiller.exe').Hash" >> $env:GITHUB_OUTPUT
-    
-    - name: 📤 Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: WordAutofiller-Windows
-        path: dist/WordAutofiller.exe
-        retention-days: 30
-    
-    - name: 🎯 Send to Discord
+    - name: Upload to Discord
       env:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       shell: pwsh
       run: |
+        $webhook = $env:DISCORD_WEBHOOK
+        $file = "dist/WordAutofiller.exe"
+        
+        # Send embed
         $embed = @{
-          title = "✅ Word Autofiller Build Complete"
-          description = "New EXE has been built successfully!"
+          title = "✅ Build Complete"
+          description = "New WordAutofiller.exe ready!"
           color = 3066993
-          fields = @(
-            @{
-              name = "📦 Version"
-              value = "${{ github.sha }}"
-              inline = $true
-            }
-            @{
-              name = "🔨 Built By"
-              value = "${{ github.actor }}"
-              inline = $true
-            }
-            @{
-              name = "📊 File Size"
-              value = "${{ steps.fileinfo.outputs.size }}"
-              inline = $true
-            }
-            @{
-              name = "🔐 SHA256"
-              value = "``${{ steps.fileinfo.outputs.hash }}``"
-              inline = $false
-            }
-            @{
-              name = "⏰ Build Time"
-              value = (Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC")
-              inline = $false
-            }
-          )
-          footer = @{
-            text = "Word Autofiller Pro"
-          }
+          timestamp = (Get-Date).ToUniversalTime().ToString("o")
         }
         
-        $payload = @{
-          username = "Build Bot"
-          embeds = @($embed)
-        } | ConvertTo-Json -Depth 10
+        $payload = @{ embeds = @($embed) } | ConvertTo-Json -Depth 4
+        Invoke-RestMethod -Uri $webhook -Method Post -Body $payload -ContentType 'application/json'
         
-        Invoke-RestMethod -Uri $env:DISCORD_WEBHOOK -Method Post -Body $payload -ContentType 'application/json'
-        
-        # Upload file to Discord
-        $boundary = [System.Guid]::NewGuid().ToString()
-        $filePath = "dist/WordAutofiller.exe"
-        $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
-        $fileName = [System.IO.Path]::GetFileName($filePath)
-        
-        $bodyLines = @(
-          "--$boundary",
-          "Content-Disposition: form-data; name=`"file`"; filename=`"$fileName`"",
-          "Content-Type: application/octet-stream",
-          "",
-          [System.Text.Encoding]::GetEncoding("iso-8859-1").GetString($fileBytes),
-          "--$boundary--"
-        )
-        
-        $body = $bodyLines -join "`r`n"
-        
-        Invoke-RestMethod -Uri $env:DISCORD_WEBHOOK -Method Post -ContentType "multipart/form-data; boundary=$boundary" -Body $body
+        # Upload file
+        curl.exe -F "file=@$file" $webhook
+    
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: WordAutofiller-Windows
+        path: dist/WordAutofiller.exe
